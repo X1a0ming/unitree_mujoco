@@ -4,3 +4,20 @@
 **/log/
 **/install/
 simulate/mujoco
+**/.idea/
+
+# RayCaster ROS2
+simulate/raycaster_ros2/ros2_ws/
+simulate/raycaster_ros2/mujoco_plugin/
+simulate/raycaster_ros2/test_*
+
+# Compiled files
+*.so
+*.a
+*.o
+*.pyc
+
+# Editor files
+*~
+.*.swp
+.*.swo

@@ -12,12 +12,15 @@ endif()
 list(APPEND CMAKE_PREFIX_PATH "/opt/unitree_robotics/lib/cmake")
 find_package(unitree_sdk2 REQUIRED)
 find_package(Boost REQUIRED COMPONENTS program_options)
+find_package(Eigen3 REQUIRED)
 
 
 include_directories(
   mujoco/include
   mujoco/simulate
   src/lodepng
+  raycaster_src
+  raycaster_plugin
 )
 link_directories(mujoco/lib)
 
@@ -31,6 +34,10 @@ file(GLOB SIM_SRC
   src/lodepng/lodepng.cpp
 )
 
+# Raycaster plugin source files
+file(GLOB RAYCASTER_SRC raycaster_src/*.cpp raycaster_src/*.h raycaster_src/*.hpp)
+file(GLOB RAYCASTER_PLUGIN_SRC raycaster_plugin/*.cc raycaster_plugin/*.h)
+
 link_libraries(
   pthread
   mujoco
@@ -41,6 +48,21 @@ link_libraries(
   fmt
 )
 
+# Build raycaster plugin as shared library
+add_library(sensor_ray SHARED ${RAYCASTER_PLUGIN_SRC} ${RAYCASTER_SRC})
+target_include_directories(sensor_ray PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} raycaster_src raycaster_plugin mujoco/include)
+target_link_libraries(sensor_ray PRIVATE mujoco Eigen3::Eigen)
+
+# Copy plugin library to build directory for loading
+add_custom_command(TARGET sensor_ray POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/mujoco_plugin"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:sensor_ray>"
+        "${CMAKE_BINARY_DIR}/mujoco_plugin/"
+    COMMENT "Copying sensor_ray plugin to mujoco_plugin directory..."
+)
+
 add_executable(unitree_mujoco ${SIM_SRC} src/main.cc)
+target_link_libraries(unitree_mujoco sensor_ray)
 
 add_executable(jstest src/joystick/jstest.cc src/joystick/joystick.cc)
