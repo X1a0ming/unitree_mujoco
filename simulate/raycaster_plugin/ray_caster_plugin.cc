@@ -31,7 +31,17 @@ RayCasterPlugin *RayCasterPlugin::Create(const mjModel *m, mjData *d,
 
 RayCasterPlugin::RayCasterPlugin(const mjModel *m, mjData *d, int instance) {
   cfg = RayCasterCfg();
-  getBaseCfg(m, d, instance);
+  
+  // First, get sensor_id before creating RayCaster
+  int id;
+  for (id = 0; id < m->nsensor; ++id) {
+    if (m->sensor_type[id] == mjSENS_PLUGIN &&
+        m->sensor_plugin[id] == instance) {
+      break;
+    }
+  }
+  sensor_id = id;
+  name = std::string(m->names + m->name_sensoradr[sensor_id]);
 
   auto resolution =
       ReadVector<double>(mj_getPluginConfig(m, instance, ray_attributes[0]));
@@ -71,12 +81,28 @@ RayCasterPlugin::RayCasterPlugin(const mjModel *m, mjData *d, int instance) {
     mju_error("RayCasterPlugin: type must be base, yaw or world");
   }
 
-  std::string name =
+  std::string cam_name =
       std::string(mj_id2name(m, mjOBJ_CAMERA, m->sensor_objid[sensor_id]));
-  cfg.cam_name = name;
+  cfg.cam_name = cam_name;
   cfg.m = m;
   cfg.d = d;
   ray_caster = new RayCaster(cfg);
+  
+  // Now call getBaseCfg to set geomgroup and other configs AFTER ray_caster is created
+  getBaseCfg(m, d, instance);
+  
+  // Apply geomgroup configuration
+  auto geomgroup_config =
+      ReadVector<bool>(mj_getPluginConfig(m, instance, "geomgroup"));
+  if (geomgroup_config.size() > 0 && geomgroup_config.size() <= 6) {
+    for (int i = 0; i < geomgroup_config.size(); i++) {
+      ray_caster->geomgroup[i] = geomgroup_config[i];
+    }
+    for (int i = geomgroup_config.size(); i < 6; i++) {
+      ray_caster->geomgroup[i] = 0;
+    }
+  }
+  
   initSensor(m, d, instance, ray_caster->nray);
 }
 

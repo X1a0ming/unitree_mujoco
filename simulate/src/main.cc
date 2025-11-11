@@ -35,6 +35,12 @@
 #include "unitree_sdk2_bridge.h"
 #include "param.h"
 
+// ROS2 support (optional)
+#ifdef ENABLE_ROS2
+#include <rclcpp/rclcpp.hpp>
+#include "raycaster_publisher.h"
+#endif
+
 #define MUJOCO_PLUGIN_DIR "mujoco_plugin"
 #define NUM_MOTOR_IDL_GO 20
 
@@ -102,6 +108,12 @@ namespace
 
   // control noise variables
   mjtNum *ctrlnoise = nullptr;
+
+#ifdef ENABLE_ROS2
+  // ROS2 raycaster publisher
+  std::shared_ptr<RaycasterPublisher> raycaster_publisher = nullptr;
+  rclcpp::Node::SharedPtr raycaster_node = nullptr;
+#endif
 
   using Seconds = std::chrono::duration<double>;
 
@@ -361,6 +373,13 @@ namespace
           free(ctrlnoise);
           ctrlnoise = (mjtNum *)malloc(sizeof(mjtNum) * m->nu);
           mju_zero(ctrlnoise, m->nu);
+
+#ifdef ENABLE_ROS2
+          // Initialize raycaster publisher with new model
+          if (raycaster_node && raycaster_publisher) {
+            raycaster_publisher->initialize(m, d);
+          }
+#endif
         }
         else
         {
@@ -391,6 +410,13 @@ namespace
           free(ctrlnoise);
           ctrlnoise = static_cast<mjtNum *>(malloc(sizeof(mjtNum) * m->nu));
           mju_zero(ctrlnoise, m->nu);
+
+#ifdef ENABLE_ROS2
+          // Initialize raycaster publisher with new model
+          if (raycaster_node && raycaster_publisher) {
+            raycaster_publisher->initialize(m, d);
+          }
+#endif
         }
         else
         {
@@ -506,6 +532,14 @@ namespace
                 mj_step(m, d);
                 stepped = true;
 
+#ifdef ENABLE_ROS2
+                // Publish raycaster data after simulation step
+                if (raycaster_node && raycaster_publisher) {
+                  raycaster_publisher->publish(m, d);
+                  rclcpp::spin_some(raycaster_node);
+                }
+#endif
+
                 // break if reset
                 if (d->time < prevSim)
                 {
@@ -554,6 +588,13 @@ void PhysicsThread(mj::Simulate *sim, const char *filename)
       free(ctrlnoise);
       ctrlnoise = static_cast<mjtNum *>(malloc(sizeof(mjtNum) * m->nu));
       mju_zero(ctrlnoise, m->nu);
+
+#ifdef ENABLE_ROS2
+      // Initialize raycaster publisher
+      if (raycaster_node && raycaster_publisher) {
+        raycaster_publisher->initialize(m, d);
+      }
+#endif
     }
     else
     {
@@ -567,6 +608,13 @@ void PhysicsThread(mj::Simulate *sim, const char *filename)
   free(ctrlnoise);
   mj_deleteData(d);
   mj_deleteModel(m);
+
+#ifdef ENABLE_ROS2
+  // Shutdown ROS2
+  if (raycaster_node) {
+    rclcpp::shutdown();
+  }
+#endif
 
   exit(0);
 }
@@ -660,6 +708,14 @@ int main(int argc, char **argv)
 
   // scan for libraries in the plugin directory to load additional plugins
   scanPluginLibraries();
+
+#ifdef ENABLE_ROS2
+  // Initialize ROS2
+  rclcpp::init(0, nullptr);
+  raycaster_node = std::make_shared<rclcpp::Node>("raycaster_publisher");
+  raycaster_publisher = std::make_shared<RaycasterPublisher>(raycaster_node);
+  std::printf("ROS2 raycaster publisher initialized\n");
+#endif
 
   mjvCamera cam;
   mjv_defaultCamera(&cam);

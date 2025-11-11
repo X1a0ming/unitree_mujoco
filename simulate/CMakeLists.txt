@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
 project(unitree_mujoco)
 
+# Option to enable ROS2 support
+option(ENABLE_ROS2 "Enable ROS2 raycaster publishing" OFF)
+
 if (CMAKE_BUILD_TYPE MATCHES "Debug")
   message("Debug mode")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -g -O0 -fPIC")
@@ -14,6 +17,16 @@ find_package(unitree_sdk2 REQUIRED)
 find_package(Boost REQUIRED COMPONENTS program_options)
 find_package(Eigen3 REQUIRED)
 
+# Find ROS2 if enabled
+if(ENABLE_ROS2)
+  find_package(rclcpp REQUIRED)
+  find_package(sensor_msgs REQUIRED)
+  find_package(geometry_msgs REQUIRED)
+  find_package(tf2_ros REQUIRED)
+  message(STATUS "ROS2 support enabled")
+  add_definitions(-DENABLE_ROS2)
+endif()
+
 
 include_directories(
   mujoco/include
@@ -21,6 +34,7 @@ include_directories(
   src/lodepng
   raycaster_src
   raycaster_plugin
+  src
 )
 link_directories(mujoco/lib)
 
@@ -64,5 +78,15 @@ add_custom_command(TARGET sensor_ray POST_BUILD
 
 add_executable(unitree_mujoco ${SIM_SRC} src/main.cc)
 target_link_libraries(unitree_mujoco sensor_ray)
+
+# Link ROS2 libraries if enabled
+if(ENABLE_ROS2)
+  ament_target_dependencies(unitree_mujoco
+    rclcpp
+    sensor_msgs
+    geometry_msgs
+    tf2_ros
+  )
+endif()
 
 add_executable(jstest src/joystick/jstest.cc src/joystick/joystick.cc)
