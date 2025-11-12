@@ -13,23 +13,6 @@ print_scene_information: 1 # Print link, joint and sensors information of robot
 
 enable_elastic_band: 0 # Virtual spring band, used for lifting h1
 
-# GridMap Configuration (requires ENABLE_ROS2)
-gridmap:
-  enabled: true                    # Enable/disable GridMap publishing
-  map_frame: "world"               # Map frame ID (use "world" for global frame, "odom" for odometry-based)
-  resolution: 0.05                 # Grid resolution in meters (5cm recommended for locomotion)
-  min_x: -2.0                      # Minimum X coordinate relative to robot
-  max_x: 2.0                       # Maximum X coordinate relative to robot
-  min_y: -2.0                      # Minimum Y coordinate relative to robot
-  max_y: 2.0                       # Maximum Y coordinate relative to robot
-  min_points_per_cell: 1           # Minimum points required per cell
-  default_uncertainty: 0.01        # Default uncertainty in meters (1cm)
-  max_uncertainty: 0.5             # Maximum uncertainty cap in meters (50cm)
-  height_offset: 0.0               # Height offset adjustment in meters
-
-# Odometry Configuration (requires ENABLE_ROS2)
-odom:
-  enabled: true                    # Enable/disable odometry publishing
-  frame_id: "odom"                 # Odometry frame ID
-  child_frame_id: "base_link"      # Robot base frame ID
-  publish_tf: true                 # Publish TF transform (odom -> base_link)
+# ROS2 Publishers (optional)
+# enable_odom: true      # Enable odometry publisher
+# enable_gridmap: true   # Enable grid map publisher

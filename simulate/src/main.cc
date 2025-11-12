@@ -732,22 +732,6 @@ int main(int argc, char **argv)
   // Initialize raycaster publisher
   raycaster_publisher = std::make_shared<RaycasterPublisher>(raycaster_node);
   std::printf("ROS2 raycaster publisher initialized\n");
-  
-  // Initialize GridMap publisher
-  gridmap_publisher = std::make_shared<GridMapPublisher>(raycaster_node, "/height_scan", "/elevation_map");
-  if (gridmap_publisher->isEnabled()) {
-    std::printf("ROS2 gridmap publisher initialized\n");
-  } else {
-    std::printf("ROS2 gridmap publisher disabled (set gridmap.enabled parameter to enable)\n");
-  }
-  
-  // Initialize Odometry publisher
-  odom_publisher = std::make_shared<OdomPublisher>(raycaster_node, "base", "/odom");
-  if (odom_publisher->isEnabled()) {
-    std::printf("ROS2 odometry publisher initialized\n");
-  } else {
-    std::printf("ROS2 odometry publisher disabled (set odom.enabled parameter to enable)\n");
-  }
 #endif
 
   mjvCamera cam;
@@ -766,6 +750,32 @@ int main(int argc, char **argv)
   if(param::config.robot_scene.is_relative()) {
     param::config.robot_scene = proj_dir.parent_path() / "unitree_robots" / param::config.robot / param::config.robot_scene;
   }
+
+#ifdef ENABLE_ROS2
+  // Initialize GridMap publisher if enabled in config
+  if (param::config.enable_gridmap) {
+    raycaster_node->declare_parameter("gridmap.enabled", true);
+    gridmap_publisher = std::make_shared<GridMapPublisher>(raycaster_node, "/height_scan", "/elevation_map");
+    if (gridmap_publisher->isEnabled()) {
+      std::printf("ROS2 gridmap publisher initialized\n");
+    }
+  } else {
+    raycaster_node->declare_parameter("gridmap.enabled", false);
+    std::printf("ROS2 gridmap publisher disabled (set enable_gridmap: true in config.yaml to enable)\n");
+  }
+  
+  // Initialize Odometry publisher if enabled in config
+  if (param::config.enable_odom) {
+    raycaster_node->declare_parameter("odom.enabled", true);
+    odom_publisher = std::make_shared<OdomPublisher>(raycaster_node, "base", "/odom");
+    if (odom_publisher->isEnabled()) {
+      std::printf("ROS2 odometry publisher initialized\n");
+    }
+  } else {
+    raycaster_node->declare_parameter("odom.enabled", false);
+    std::printf("ROS2 odometry publisher disabled (set enable_odom: true in config.yaml to enable)\n");
+  }
+#endif
 
   // simulate object encapsulates the UI
   auto sim = std::make_unique<mj::Simulate>(

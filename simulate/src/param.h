@@ -26,6 +26,9 @@ inline struct SimulationConfig
     int enable_elastic_band;
     int band_attached_link = 0;
 
+    bool enable_odom = false;
+    bool enable_gridmap = false;
+
     void load_from_yaml(const std::string &filename)
     {
         auto cfg = YAML::LoadFile(filename);
@@ -41,6 +44,14 @@ inline struct SimulationConfig
             joystick_bits = cfg["joystick_bits"].as<int>();
             print_scene_information = cfg["print_scene_information"].as<int>();
             enable_elastic_band = cfg["enable_elastic_band"].as<int>();
+            
+            // Optional ROS2 publisher configurations (default to false if not present)
+            if (cfg["enable_odom"]) {
+                enable_odom = cfg["enable_odom"].as<bool>();
+            }
+            if (cfg["enable_gridmap"]) {
+                enable_gridmap = cfg["enable_gridmap"].as<bool>();
+            }
         }
         catch(const std::exception& e)
         {
