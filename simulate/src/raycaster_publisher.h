@@ -82,7 +82,8 @@ public:
                 }
                 
                 // Create publisher
-                std::string topic_name = std::string("/raycaster/") + sensor_name;
+                // Use /height_scan as default topic for compatibility with heightmap subscriber
+                std::string topic_name = "/height_scan";
                 sensor.publisher = node_->create_publisher<sensor_msgs::msg::PointCloud2>(
                     topic_name, 10);
                 
@@ -231,13 +232,27 @@ private:
                 data_ptr = d->sensordata + sensor.data_adr;
             }
             
-            // Copy data
+            // Copy data and filter invalid points
             float* msg_data_ptr = reinterpret_cast<float*>(msg.data.data());
+            int valid_points = 0;
             for (int i = 0; i < num_points; i++) {
-                msg_data_ptr[i * 3 + 0] = static_cast<float>(data_ptr[i * 3 + 0]);
-                msg_data_ptr[i * 3 + 1] = static_cast<float>(data_ptr[i * 3 + 1]);
-                msg_data_ptr[i * 3 + 2] = static_cast<float>(data_ptr[i * 3 + 2]);
+                float x = static_cast<float>(data_ptr[i * 3 + 0]);
+                float y = static_cast<float>(data_ptr[i * 3 + 1]);
+                float z = static_cast<float>(data_ptr[i * 3 + 2]);
+                
+                // Check if point is valid (not NaN and not at extreme distance)
+                if (std::isfinite(x) && std::isfinite(y) && std::isfinite(z)) {
+                    msg_data_ptr[valid_points * 3 + 0] = x;
+                    msg_data_ptr[valid_points * 3 + 1] = y;
+                    msg_data_ptr[valid_points * 3 + 2] = z;
+                    valid_points++;
+                }
             }
+            
+            // Update message size to reflect only valid points
+            msg.width = valid_points;
+            msg.row_step = msg.point_step * valid_points;
+            msg.data.resize(msg.row_step);
             
             sensor.publisher->publish(msg);
         }

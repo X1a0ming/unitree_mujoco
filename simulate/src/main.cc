@@ -39,6 +39,8 @@
 #ifdef ENABLE_ROS2
 #include <rclcpp/rclcpp.hpp>
 #include "raycaster_publisher.h"
+#include "gridmap_publisher.h"
+#include "odom_publisher.h"
 #endif
 
 #define MUJOCO_PLUGIN_DIR "mujoco_plugin"
@@ -110,8 +112,10 @@ namespace
   mjtNum *ctrlnoise = nullptr;
 
 #ifdef ENABLE_ROS2
-  // ROS2 raycaster publisher
+  // ROS2 publishers
   std::shared_ptr<RaycasterPublisher> raycaster_publisher = nullptr;
+  std::shared_ptr<GridMapPublisher> gridmap_publisher = nullptr;
+  std::shared_ptr<OdomPublisher> odom_publisher = nullptr;
   rclcpp::Node::SharedPtr raycaster_node = nullptr;
 #endif
 
@@ -536,6 +540,13 @@ namespace
                 // Publish raycaster data after simulation step
                 if (raycaster_node && raycaster_publisher) {
                   raycaster_publisher->publish(m, d);
+                }
+                // Publish odometry
+                if (raycaster_node && odom_publisher) {
+                  odom_publisher->publish(m, d);
+                }
+                // Spin ROS2 node
+                if (raycaster_node) {
                   rclcpp::spin_some(raycaster_node);
                 }
 #endif
@@ -593,6 +604,10 @@ void PhysicsThread(mj::Simulate *sim, const char *filename)
       // Initialize raycaster publisher
       if (raycaster_node && raycaster_publisher) {
         raycaster_publisher->initialize(m, d);
+      }
+      // Initialize odometry publisher
+      if (raycaster_node && odom_publisher) {
+        odom_publisher->initialize(m, d);
       }
 #endif
     }
@@ -713,8 +728,26 @@ int main(int argc, char **argv)
   // Initialize ROS2
   rclcpp::init(0, nullptr);
   raycaster_node = std::make_shared<rclcpp::Node>("raycaster_publisher");
+  
+  // Initialize raycaster publisher
   raycaster_publisher = std::make_shared<RaycasterPublisher>(raycaster_node);
   std::printf("ROS2 raycaster publisher initialized\n");
+  
+  // Initialize GridMap publisher
+  gridmap_publisher = std::make_shared<GridMapPublisher>(raycaster_node, "/height_scan", "/elevation_map");
+  if (gridmap_publisher->isEnabled()) {
+    std::printf("ROS2 gridmap publisher initialized\n");
+  } else {
+    std::printf("ROS2 gridmap publisher disabled (set gridmap.enabled parameter to enable)\n");
+  }
+  
+  // Initialize Odometry publisher
+  odom_publisher = std::make_shared<OdomPublisher>(raycaster_node, "base", "/odom");
+  if (odom_publisher->isEnabled()) {
+    std::printf("ROS2 odometry publisher initialized\n");
+  } else {
+    std::printf("ROS2 odometry publisher disabled (set odom.enabled parameter to enable)\n");
+  }
 #endif
 
   mjvCamera cam;

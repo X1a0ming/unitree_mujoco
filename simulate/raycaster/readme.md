@@ -5,6 +5,7 @@
 ## 目录
 - [项目结构](#项目结构)
 - [快速开始](#快速开始)
+- [GridMap集成](#gridmap集成)
 - [XML配置详解](#xml配置详解)
 - [ROS2集成使用](#ros2集成使用)
 - [进阶配置](#进阶配置)
@@ -15,75 +16,66 @@
 
 ```
 simulate/
-├── raycaster_src/          # RayCaster核心源代码
-├── raycaster_plugin/       # MuJoCo插件实现
-├── raycaster_ros2/         # 独立ROS2节点（详见raycaster_ros2/README.md）
-│   ├── raycaster_ros2_node.h/cpp
-│   ├── CMakeLists.txt & package.xml
-│   ├── build.sh & run_simple.sh
-│   ├── launch/raycaster.launch.py
-│   ├── models/raycaster_test.xml
-│   └── README.md           # 详细使用文档
-└── CMakeLists.txt          # 已修改支持raycaster编译
+├── raycaster/                   # Raycaster传感器模块
+│   ├── src/                     # 核心算法实现
+│   │   ├── RayCaster.cpp/h
+│   │   ├── RayCasterCamera.cpp/h
+│   │   ├── RayCasterLidar.cpp/h
+│   │   └── Noise.hpp, RayNoise.hpp
+│   └── plugin/                  # MuJoCo插件接口
+│       ├── ray_caster_plugin.cc/h
+│       ├── ray_caster_camera_plugin.cc/h
+│       ├── ray_caster_lidar_plugin.cc/h
+│       └── register.cc
+├── src/
+│   ├── raycaster_publisher.h    # ROS2点云发布器
+│   └── gridmap_publisher.h      # ROS2 GridMap发布器
+└── CMakeLists.txt               # 支持raycaster和ROS2编译
 ```
 
 ## 快速开始
 
 ### 1. 编译
 
-**编译主项目（包含raycaster插件）:**
 ```bash
 cd ~/clone/unitree_mujoco/simulate/build
 
-# 不使用ROS2
+# 方式1: 不使用ROS2（纯MuJoCo仿真）
 cmake ..
 make -j$(nproc)
 
-# 或启用ROS2支持（推荐）
+# 方式2: 启用ROS2（包含raycaster点云和GridMap发布）
 source /opt/ros/humble/setup.bash  # 根据你的ROS2版本
 cmake -DENABLE_ROS2=ON ..
 make -j$(nproc)
 ```
 
-**编译独立ROS2节点（可选）:**
+**ROS2依赖安装**:
 ```bash
-cd ~/clone/unitree_mujoco/simulate/raycaster_ros2
-source /opt/ros/humble/setup.bash  # 根据你的ROS2版本
-./build.sh
+sudo apt install ros-humble-rclcpp \
+                 ros-humble-sensor-msgs \
+                 ros-humble-geometry-msgs \
+                 ros-humble-tf2-ros \
+                 ros-humble-grid-map-core \
+                 ros-humble-grid-map-ros \
+                 ros-humble-grid-map-msgs \
+                 ros-humble-grid-map-cv \
+                 ros-humble-pcl-conversions
 ```
 
 ### 2. 运行
 
-**方式1: 主仿真集成ROS2（推荐 - 机器人控制+传感器同步）**
-
-如果编译时启用了ROS2（`-DENABLE_ROS2=ON`）：
 ```bash
 cd ~/clone/unitree_mujoco/simulate/build
-source /opt/ros/humble/setup.bash  # 确保source ROS2
+source /opt/ros/humble/setup.bash  # 如果启用了ROS2
 ./unitree_mujoco
 ```
 
-此方式特点：
-- 传感器数据与机器人控制完全同步
-- 每次`mj_step`后立即发布点云和TF
-- 适合SLAM、导航等需要精确时间同步的应用
-
-**方式2: 独立ROS2节点（仅传感器测试）**
-```bash
-cd ~/clone/unitree_mujoco/simulate/raycaster_ros2
-./run_simple.sh  # 使用测试模型
-
-# 或使用自己的模型
-source ros2_ws/install/setup.bash
-export LD_LIBRARY_PATH="~/clone/unitree_mujoco/simulate/mujoco/lib:$LD_LIBRARY_PATH"
-ros2 run raycaster_ros2 raycaster_ros2_node --ros-args \
-  -p model_file:=/path/to/your/model.xml
-```
-
-此方式特点：
-- 独立仿真，不需要机器人控制
-- 适合快速测试传感器配置
-- 可调节发布频率和TF参数
+**ROS2模式特点**:
+- 发布点云到 `/height_scan` (PointCloud2)
+- 发布高程地图到 `/elevation_map` (GridMap)
+- 发布TF变换到 `/tf`
+- 完全同步，零延迟
 
 ### 3. 查看数据
 
@@ -95,10 +87,10 @@ source /opt/ros/humble/setup.bash
 ros2 topic list
 
 # 查看点云数据
-ros2 topic echo /raycaster/<sensor_name>
+ros2 topic echo /height_scan
 
 # 查看发布频率
-ros2 topic hz /raycaster/<sensor_name>
+ros2 topic hz /height_scan
 
 # 查看TF树
 ros2 run tf2_tools view_frames
@@ -107,7 +99,7 @@ ros2 run tf2_tools view_frames
 rviz2
 # 在RViz2中：
 # 1. Fixed Frame 设为 "world"
-# 2. Add -> PointCloud2, Topic选择 /raycaster/<sensor_name>
+# 2. Add -> PointCloud2, Topic选择 /height_scan
 # 3. Add -> TF（可选，查看坐标系）
 ```
 
@@ -791,7 +783,129 @@ mjData.sensordata[sensor_adr + offset]
 | n_step_update | 1 | int | 更新频率 |
 | compute_time_log | 0 | int | 打印计算时间 |
 
-## ROS2集成使用
+## ROS2集成
+
+### 编译配置
+
+#### 不使用ROS2（纯MuJoCo仿真）
+```bash
+cd ~/clone/unitree_mujoco/simulate/build
+cmake ..
+make -j$(nproc)
+```
+
+#### 启用ROS2（包含raycaster + GridMap）
+```bash
+cd ~/clone/unitree_mujoco/simulate/build
+source /opt/ros/humble/setup.bash
+cmake -DENABLE_ROS2=ON ..
+make -j$(nproc)
+```
+
+**依赖安装**:
+```bash
+sudo apt install ros-humble-rclcpp \
+                 ros-humble-sensor-msgs \
+                 ros-humble-geometry-msgs \
+                 ros-humble-tf2-ros \
+                 ros-humble-grid-map-core \
+                 ros-humble-grid-map-ros \
+                 ros-humble-grid-map-msgs \
+                 ros-humble-grid-map-cv \
+                 ros-humble-pcl-conversions
+```
+
+### 运行
+
+```bash
+cd ~/clone/unitree_mujoco/simulate/build
+source /opt/ros/humble/setup.bash
+./unitree_mujoco
+```
+
+### 数据流
+
+```
+MuJoCo Simulation (mj_step)
+    ↓
+Raycaster Plugin
+    ↓
+RaycasterPublisher → /height_scan (PointCloud2)
+    ↓
+GridMapPublisher → /elevation_map (GridMap)
+    ↓
+HeightmapSubscriber (stepit)
+```
+
+### 话题说明
+
+| 话题 | 消息类型 | 说明 |
+|------|---------|------|
+| `/height_scan` | sensor_msgs/PointCloud2 | 点云数据 |
+| `/elevation_map` | grid_map_msgs/GridMap | 高程地图（可禁用） |
+| `/tf` | tf2_msgs/TFMessage | 坐标变换 |
+
+### GridMap配置
+
+编辑 `config.yaml`：
+
+```yaml
+/**:
+  ros__parameters:
+    gridmap:
+      enabled: true           # 启用/禁用GridMap发布
+      map_frame: "odom"      # 地图坐标系
+      resolution: 0.05       # 网格分辨率（米）
+      min_x: -1.0           # 地图边界
+      max_x: 1.0
+      min_y: -1.0
+      max_y: 1.0
+      min_points_per_cell: 1
+      default_uncertainty: 0.1
+```
+
+### 与stepit集成
+
+在stepit策略配置中：
+
+```yaml
+grid_map_topic: "/elevation_map"
+localization_topic: "/odom"              # 如果没有odom，使用其他定位源
+elevation_layer: "elevation"
+uncertainty_layer: "uncertainty"
+uncertainty_stddev_ratio: 4
+elevation_interpolation_method: "linear"
+heightmap_zero_mean: true
+```
+
+**注意**：如果系统中没有 `/odom` 话题，需要：
+1. 发布机器人里程计到 `/odom`
+2. 或在 stepit 配置中使用其他定位话题（如 `/imu`, `/base_link` 等）
+
+### 验证数据
+
+```bash
+# 查看话题
+ros2 topic list
+
+# 查看点云
+ros2 topic echo /height_scan --once
+
+# 查看GridMap
+ros2 topic echo /elevation_map --once
+
+# 查看频率
+ros2 topic hz /height_scan
+ros2 topic hz /elevation_map
+
+# RViz2可视化
+rviz2
+# Fixed Frame: "odom"
+# Add -> PointCloud2: /height_scan
+# Add -> GridMap: /elevation_map (Layer: elevation)
+```
+
+---
 
 ### 主仿真集成模式（推荐）
 
@@ -831,7 +945,8 @@ source /opt/ros/humble/setup.bash
 
 | Topic | 消息类型 | 说明 |
 |-------|---------|------|
-| `/raycaster/<sensor_name>` | sensor_msgs/PointCloud2 | 点云数据 |
+| `/height_scan` | sensor_msgs/PointCloud2 | 点云数据（默认话题） |
+| `/elevation_map` | grid_map_msgs/GridMap | GridMap数据（需要转换节点） |
 | `/tf` | tf2_msgs/TFMessage | TF变换（如果配置了framepos/framequat） |
 
 **查看数据：**
@@ -843,10 +958,14 @@ source /opt/ros/humble/setup.bash
 ros2 topic list
 
 # 查看点云
-ros2 topic echo /raycaster/front_depth_sensor
+ros2 topic echo /height_scan
+
+# 查看 GridMap（需要启动转换节点）
+ros2 topic echo /elevation_map
 
 # 查看发布频率
-ros2 topic hz /raycaster/front_depth_sensor
+ros2 topic hz /height_scan
+ros2 topic hz /elevation_map
 
 # 查看TF
 ros2 run tf2_tools view_frames
@@ -1355,15 +1474,6 @@ print(f"Vertical FOV: {math.degrees(v_fov):.1f}° ({v_fov:.3f} rad)")
 - ✅ **传感器仿真**: 测试感知算法
 - ✅ **多传感器融合**: 深度相机 + 激光雷达 + IMU
 
-## 贡献
-
-欢迎提交Issue和Pull Request！
-
 ## 许可证
 
 本项目遵循与unitree_mujoco相同的许可证。
-
----
-
-**更新日期**: 2024-11-11  
-**维护者**: unitree_mujoco团队
