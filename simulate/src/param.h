@@ -26,6 +26,7 @@ inline struct SimulationConfig
     int enable_elastic_band;
     int band_attached_link = 0;
 
+    bool enable_ray_array = false;
     bool enable_odom = false;
     bool enable_gridmap = false;
 
@@ -46,6 +47,9 @@ inline struct SimulationConfig
             enable_elastic_band = cfg["enable_elastic_band"].as<int>();
             
             // Optional ROS2 publisher configurations (default to false if not present)
+            if (cfg["enable_ray_array"]) {
+                enable_ray_array = cfg["enable_ray_array"].as<bool>();
+            }
             if (cfg["enable_odom"]) {
                 enable_odom = cfg["enable_odom"].as<bool>();
             }

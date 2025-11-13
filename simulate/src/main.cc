@@ -41,6 +41,7 @@
 #include "raycaster_publisher.h"
 #include "gridmap_publisher.h"
 #include "odom_publisher.h"
+#include "height_scan_converter.h"
 #endif
 
 #define MUJOCO_PLUGIN_DIR "mujoco_plugin"
@@ -116,6 +117,7 @@ namespace
   std::shared_ptr<RaycasterPublisher> raycaster_publisher = nullptr;
   std::shared_ptr<GridMapPublisher> gridmap_publisher = nullptr;
   std::shared_ptr<OdomPublisher> odom_publisher = nullptr;
+  std::shared_ptr<HeightScanConverter> height_scan_converter = nullptr;
   rclcpp::Node::SharedPtr raycaster_node = nullptr;
 #endif
 
@@ -752,6 +754,18 @@ int main(int argc, char **argv)
   }
 
 #ifdef ENABLE_ROS2
+  // Initialize height scan converter
+  if (param::config.enable_ray_array) {
+    // Parameters: (node, flatten_xyz, zero_mean)
+    // flatten_xyz=false: only output z values [z0, z1, z2, ...]
+    // zero_mean=true: subtract mean from z values to normalize height
+    height_scan_converter = std::make_shared<HeightScanConverter>(raycaster_node, false, true);
+    height_scan_converter->initialize("/height_scan", "/height_scan_array");
+    std::printf("ROS2 height scan converter initialized (flatten_xyz=false, zero_mean=true)\n");
+  } else {
+    std::printf("ROS2 height scan converter disabled (set enable_ray_array: true in config.yaml to enable)\n");
+  }
+
   // Initialize GridMap publisher if enabled in config
   if (param::config.enable_gridmap) {
     raycaster_node->declare_parameter("gridmap.enabled", true);

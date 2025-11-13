@@ -833,8 +833,6 @@ Raycaster Plugin
 RaycasterPublisher → /height_scan (PointCloud2)
     ↓
 GridMapPublisher → /elevation_map (GridMap)
-    ↓
-HeightmapSubscriber (stepit)
 ```
 
 ### 话题说明
@@ -863,24 +861,6 @@ HeightmapSubscriber (stepit)
       min_points_per_cell: 1
       default_uncertainty: 0.1
 ```
-
-### 与stepit集成
-
-在stepit策略配置中：
-
-```yaml
-grid_map_topic: "/elevation_map"
-localization_topic: "/odom"              # 如果没有odom，使用其他定位源
-elevation_layer: "elevation"
-uncertainty_layer: "uncertainty"
-uncertainty_stddev_ratio: 4
-elevation_interpolation_method: "linear"
-heightmap_zero_mean: true
-```
-
-**注意**：如果系统中没有 `/odom` 话题，需要：
-1. 发布机器人里程计到 `/odom`
-2. 或在 stepit 配置中使用其他定位话题（如 `/imu`, `/base_link` 等）
 
 ### 验证数据
 
