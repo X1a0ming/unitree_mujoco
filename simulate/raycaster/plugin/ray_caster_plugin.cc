@@ -134,8 +134,8 @@ void RayCasterPlugin::RegisterPlugin() {
     if (size[0] <= 0 || size[1] <= 0 || resolution[0] <= 0)
       mju_error("RayCasterPlugin: size and resolution must be positive");
 
-    int nray = ((int)(size[0] / resolution[0]) + 1) *
-               ((int)(size[1] / resolution[0]) + 1);
+    int nray = (static_cast<int>(std::round(size[0] / resolution[0])) + 1) *
+               (static_cast<int>(std::round(size[1] / resolution[0])) + 1);
     int n_data = computeDateSize(m, instance, nray);
     return n_data;
   };

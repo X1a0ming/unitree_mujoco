@@ -29,8 +29,10 @@ void RayCaster::init(const mjModel *m, mjData *d, std::string cam_name,
   this->size[0] = size[1];
   this->size[1] = size[0];
   this->type = type;
-  _init(m, d, cam_name, (this->size[0] / resolution) + 1,
-        (this->size[1] / resolution) + 1, dis_range, is_detect_parentbody);
+  _init(m, d, cam_name,
+        static_cast<int>(std::round(this->size[0] / resolution)) + 1,
+        static_cast<int>(std::round(this->size[1] / resolution)) + 1,
+        dis_range, is_detect_parentbody);
 }
 
 RayCaster::~RayCaster() {
@@ -118,8 +120,8 @@ int RayCaster::get_idx(int v, int h) {
 int RayCaster::_get_idx(int v, int h) { return v * h_ray_num + h; }
 
 int RayCaster::get_nray(RayCasterCfg &cfg) {
-  return ((int)(cfg.size[0] / cfg.resolution) + 1) *
-         ((int)(cfg.size[1] / cfg.resolution) + 1);
+  return (static_cast<int>(std::round(cfg.size[0] / cfg.resolution)) + 1) *
+         (static_cast<int>(std::round(cfg.size[1] / cfg.resolution)) + 1);
 }
 
 void RayCaster::setNoise(ray_noise::RayNoise2 noise) {
