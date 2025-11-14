@@ -9,6 +9,7 @@
 #include <memory>
 #include <cstring>
 #include <iostream>
+#include <sstream>
 
 class DepthImageVisualizer {
 public:
@@ -17,6 +18,22 @@ public:
         if (display_scale_ > 4) display_scale_ = 4;
     }
     ~DepthImageVisualizer() = default;
+    
+private:
+    // Helper function to parse sensor_data_types configuration
+    static std::vector<std::string> parse_sensor_data_types(const std::string& config_str) {
+        std::vector<std::string> result;
+        std::stringstream ss(config_str);
+        std::string item;
+        while (ss >> item) {
+            if (!item.empty()) {
+                result.push_back(item);
+            }
+        }
+        return result;
+    }
+    
+public:
     
     void initialize(mjModel* m, mjData* d, mujoco::Simulate* sim) {
         if (!m || !d || !sim) return;
@@ -57,6 +74,20 @@ public:
                 sensor.plugin_id = plugin_id;
                 sensor.state_adr = m->plugin_stateadr[plugin_id];
                 
+                // Read sensor_data_types configuration from plugin
+                const char* config_str = mj_getPluginConfig(m, plugin_id, "sensor_data_types");
+                std::vector<std::string> sensor_data_types;
+                if (config_str) {
+                    sensor_data_types = parse_sensor_data_types(std::string(config_str));
+                    std::cout << "  sensor_data_types config: " << config_str << std::endl;
+                }
+                
+                // Read dis_range configuration from plugin
+                const char* dis_range_str = mj_getPluginConfig(m, plugin_id, "dis_range");
+                if (dis_range_str) {
+                    std::cout << "  dis_range config: " << dis_range_str << std::endl;
+                }
+                
                 // Get image dimensions from plugin state
                 if (d && sensor.state_adr >= 0 && m->plugin_statenum[plugin_id] >= 2) {
                     sensor.width = static_cast<int>(d->plugin_state[sensor.state_adr + 0]);
@@ -67,25 +98,58 @@ public:
                     
                     // Get data configuration from plugin state
                     // State layout: [width, height, data1_offset, data1_size, data2_offset, data2_size, ...]
-                    int num_data_configs = (m->plugin_statenum[plugin_id] - 2) / 2;
-                    std::cout << "  Number of data configs: " << num_data_configs << std::endl;
+                    std::vector<std::pair<int, int>> data_configs;
+                    for (int j = sensor.state_adr + 2; 
+                         j < sensor.state_adr + m->plugin_statenum[plugin_id]; 
+                         j += 2) {
+                        int offset = static_cast<int>(d->plugin_state[j]);
+                        int size = static_cast<int>(d->plugin_state[j + 1]);
+                        data_configs.push_back({offset, size});
+                    }
                     
+                    std::cout << "  Number of data configs: " << data_configs.size() << std::endl;
+                    
+                    // Match data configs with sensor_data_types configuration
+                    // Look for "image" type first (preferred for visualization)
                     bool found_image = false;
-                    for (int j = 0; j < num_data_configs; j++) {
-                        int state_idx = sensor.state_adr + 2 + j * 2;
-                        int offset = static_cast<int>(d->plugin_state[state_idx]);
-                        int size = static_cast<int>(d->plugin_state[state_idx + 1]);
+                    for (size_t j = 0; j < sensor_data_types.size() && j < data_configs.size(); j++) {
+                        std::cout << "  Data config " << j << ": type='" << sensor_data_types[j] 
+                                  << "', offset=" << data_configs[j].first 
+                                  << ", size=" << data_configs[j].second << std::endl;
                         
-                        std::cout << "  Data config " << j << ": offset=" << offset 
-                                  << ", size=" << size << std::endl;
-                        
-                        // First data type is usually "image" if configured
-                        // Try the first valid data configuration
-                        if (j == 0 && size == sensor.width * sensor.height) {
-                            sensor.image_data_offset = offset;
-                            sensor.image_data_size = size;
+                        if (sensor_data_types[j].find("image") != std::string::npos) {
+                            sensor.image_data_offset = data_configs[j].first;
+                            sensor.image_data_size = data_configs[j].second;
                             found_image = true;
-                            std::cout << "  Using data config " << j << " as image data" << std::endl;
+                            std::cout << "  ✓ Using 'image' type for visualization (index " << j << ")" << std::endl;
+                            break;
+                        }
+                    }
+                    
+                    // If no "image" type, look for "normal" type
+                    if (!found_image) {
+                        for (size_t j = 0; j < sensor_data_types.size() && j < data_configs.size(); j++) {
+                            if (sensor_data_types[j].find("normal") != std::string::npos) {
+                                sensor.image_data_offset = data_configs[j].first;
+                                sensor.image_data_size = data_configs[j].second;
+                                found_image = true;
+                                std::cout << "  ✓ Using 'normal' type for visualization (index " << j << ")" << std::endl;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // If still no suitable type, look for "data" type as fallback
+                    if (!found_image) {
+                        for (size_t j = 0; j < sensor_data_types.size() && j < data_configs.size(); j++) {
+                            if (sensor_data_types[j].find("data") != std::string::npos) {
+                                sensor.image_data_offset = data_configs[j].first;
+                                sensor.image_data_size = data_configs[j].second;
+                                found_image = true;
+                                std::cout << "  ⚠ Using 'data' type for visualization (index " << j 
+                                          << ") - prefer 'image' for better visualization" << std::endl;
+                                break;
+                            }
                         }
                     }
                     
