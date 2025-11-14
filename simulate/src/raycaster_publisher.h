@@ -98,6 +98,9 @@ public:
                 std::string output_format_str = param::config.raycaster_output_format;
                 bool flatten_xyz = param::config.raycaster_flatten_xyz;
                 bool zero_mean = param::config.raycaster_zero_mean;
+                float offset = 0.0f;
+                std::string replace_nan = "";
+                float max_distance = 0.0f;
                 
                 // Check if sensor has specific configuration
                 auto it = param::config.raycaster_sensors.find(sensor_name);
@@ -107,6 +110,9 @@ public:
                     }
                     flatten_xyz = it->second.flatten_xyz;
                     zero_mean = it->second.zero_mean;
+                    offset = it->second.offset;
+                    replace_nan = it->second.replace_nan;
+                    max_distance = it->second.max_distance;
                 }
                 
                 // Determine output format for this sensor
@@ -116,6 +122,9 @@ public:
                 sensor.output_format = sensor_format;
                 sensor.flatten_xyz = flatten_xyz;
                 sensor.zero_mean = zero_mean;
+                sensor.offset = offset;
+                sensor.replace_nan = replace_nan;
+                sensor.max_distance = max_distance;
                 
                 if (sensor_format == OutputFormat::POINTCLOUD) {
                     sensor.pc_publisher = node_->create_publisher<sensor_msgs::msg::PointCloud2>(
@@ -205,6 +214,9 @@ private:
         OutputFormat output_format;
         bool flatten_xyz;
         bool zero_mean;
+        float offset;              // Offset to apply to distances
+        std::string replace_nan;  // "zero", "max", or ""
+        float max_distance;        // Maximum distance from sensor config
         
         // Publishers for different formats
         rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pc_publisher;
@@ -309,26 +321,26 @@ private:
                 data_ptr = d->sensordata + sensor.data_adr;
             }
             
-            // Fast copy with type conversion
+            // Fast copy with type conversion and offset application
             float* msg_data_ptr = reinterpret_cast<float*>(msg.data.data());
             for (int i = 0; i < num_points; i++) {
                 msg_data_ptr[i * 3 + 0] = static_cast<float>(data_ptr[i * 3 + 0]);
                 msg_data_ptr[i * 3 + 1] = static_cast<float>(data_ptr[i * 3 + 1]);
-                msg_data_ptr[i * 3 + 2] = static_cast<float>(data_ptr[i * 3 + 2]);
+                msg_data_ptr[i * 3 + 2] = static_cast<float>(data_ptr[i * 3 + 2]) + sensor.offset;
             }
-            
+
             msg.width = num_points;
             msg.row_step = msg.point_step * num_points;
-            
+
             sensor.pc_publisher->publish(msg);
     }
-    
+
     void publish_sensor_as_array(RayCasterSensor& sensor, mjData* d) {
         auto& msg = sensor.array_msg_template;
         msg.data.clear();
-        
+
         int num_points = sensor.h_ray_num * sensor.v_ray_num;
-        
+
         // Get data pointer
         mjtNum* data_ptr = nullptr;
         if (sensor.pos_w_data_size > 0 && sensor.pos_w_data_offset >= 0) {
@@ -336,63 +348,75 @@ private:
         } else {
             data_ptr = d->sensordata + sensor.data_adr;
         }
-        
+
+        // Helper function to replace non-finite values
+        auto replace_nonfinite = [&](float value) -> float {
+            if (!std::isfinite(value)) {
+                if (sensor.replace_nan == "zero") {
+                    return 0.0f;
+                } else if (sensor.replace_nan == "max") {
+                    return sensor.max_distance;
+                }
+            }
+            return value;
+        };
+
         if (sensor.flatten_xyz) {
             // Flatten all x, y, z values: [x0, y0, z0, x1, y1, z1, ...]
             msg.data.reserve(num_points * 3);
-            
+
             if (sensor.zero_mean) {
-                // First pass: compute mean of z values
+                // First pass: compute mean of z values (after offset)
                 float z_sum = 0.0f;
                 int z_count = 0;
                 for (int i = 0; i < num_points; i++) {
-                    float z = static_cast<float>(data_ptr[i * 3 + 2]);
+                    float z = replace_nonfinite(static_cast<float>(data_ptr[i * 3 + 2]) + sensor.offset);
                     if (std::isfinite(z)) {
                         z_sum += z;
                         z_count++;
                     }
                 }
                 float z_mean = (z_count > 0) ? (z_sum / z_count) : 0.0f;
-                
+
                 // Second pass: subtract mean from z
                 for (int i = 0; i < num_points; i++) {
-                    msg.data.push_back(static_cast<float>(data_ptr[i * 3 + 0]));
-                    msg.data.push_back(static_cast<float>(data_ptr[i * 3 + 1]));
-                    msg.data.push_back(static_cast<float>(data_ptr[i * 3 + 2]) - z_mean);
+                    msg.data.push_back(replace_nonfinite(static_cast<float>(data_ptr[i * 3 + 0])));
+                    msg.data.push_back(replace_nonfinite(static_cast<float>(data_ptr[i * 3 + 1])));
+                    msg.data.push_back(replace_nonfinite(static_cast<float>(data_ptr[i * 3 + 2]) + sensor.offset) - z_mean);
                 }
             } else {
-                // No mean subtraction
+                // No mean subtraction, but apply offset
                 for (int i = 0; i < num_points; i++) {
-                    msg.data.push_back(static_cast<float>(data_ptr[i * 3 + 0]));
-                    msg.data.push_back(static_cast<float>(data_ptr[i * 3 + 1]));
-                    msg.data.push_back(static_cast<float>(data_ptr[i * 3 + 2]));
+                    msg.data.push_back(replace_nonfinite(static_cast<float>(data_ptr[i * 3 + 0])));
+                    msg.data.push_back(replace_nonfinite(static_cast<float>(data_ptr[i * 3 + 1])));
+                    msg.data.push_back(replace_nonfinite(static_cast<float>(data_ptr[i * 3 + 2]) + sensor.offset));
                 }
             }
         } else {
             // Only z values: [z0, z1, z2, ...]
             msg.data.reserve(num_points);
-            
+
             if (sensor.zero_mean) {
-                // Compute mean
+                // Compute mean (after offset)
                 float z_sum = 0.0f;
                 int z_count = 0;
                 for (int i = 0; i < num_points; i++) {
-                    float z = static_cast<float>(data_ptr[i * 3 + 2]);
+                    float z = replace_nonfinite(static_cast<float>(data_ptr[i * 3 + 2]) + sensor.offset);
                     if (std::isfinite(z)) {
                         z_sum += z;
                         z_count++;
                     }
                 }
                 float z_mean = (z_count > 0) ? (z_sum / z_count) : 0.0f;
-                
+
                 // Subtract mean
                 for (int i = 0; i < num_points; i++) {
-                    msg.data.push_back(static_cast<float>(data_ptr[i * 3 + 2]) - z_mean);
+                    msg.data.push_back(replace_nonfinite(static_cast<float>(data_ptr[i * 3 + 2]) + sensor.offset) - z_mean);
                 }
             } else {
-                // No mean subtraction
+                // No mean subtraction, but apply offset
                 for (int i = 0; i < num_points; i++) {
-                    msg.data.push_back(static_cast<float>(data_ptr[i * 3 + 2]));
+                    msg.data.push_back(replace_nonfinite(static_cast<float>(data_ptr[i * 3 + 2]) + sensor.offset));
                 }
             }
         }

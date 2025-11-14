@@ -268,7 +268,7 @@
       <config key="dis_range" value="0.1 10"/>
       <config key="type" value="yaw"/>
       <config key="sensor_data_types" value="pos_b"/>
-<!--      <config key="draw_deep_ray_ids" value="1 10 0.5 0.5 0 0.5 0 5 12 220" />-->
+      <config key="draw_deep_ray_ids" value="1 10 0.5 0.5 0 0.5 0 5 10 186" />
       <config key="draw_hip_point" value="1 0.02" />
       <config key="geomgroup" value="1 0 0 0 0 0" />
     </plugin>

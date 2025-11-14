@@ -28,11 +28,16 @@ raycaster_sensors:
   height_scan:
     output_format: "array"   # Output as Float32MultiArray
     flatten_xyz: false       # Only z values [z0, z1, z2, ...]
-    zero_mean: true          # Subtract mean (good for terrain mapping)
+    zero_mean: false          # Subtract mean
+    replace_nan: "zero"      # Replace NaN/Inf with 0.0
+    max_distance: 3.0       # Max distance (used when replace_nan="max")
+    offset: 0.5
   depth_camera:
     output_format: "array"
     flatten_xyz: false
     zero_mean: false         # Keep absolute depth values
+    replace_nan: "zero"       # Replace NaN/Inf with max_distance
+    max_distance: 3.0        # Match dis_range max from b2.xml
 
 # Depth Image Visualizer (optional, impacts performance)
 enable_depth_visualizer: true  # Enable depth camera visualization (default: false)

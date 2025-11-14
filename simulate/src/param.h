@@ -41,6 +41,9 @@ inline struct SimulationConfig
         std::string output_format = "";  // Empty = use default
         bool flatten_xyz = true;
         bool zero_mean = false;
+        float offset = 0.0f;         // Offset to add to all distance values
+        std::string replace_nan = "";  // How to replace NaN/Inf: "zero", "max", or "" (no replacement)
+        float max_distance = 10.0f;    // Maximum distance for "max" replacement
     };
     std::map<std::string, RaycasterSensorConfig> raycaster_sensors;
     
@@ -103,6 +106,15 @@ inline struct SimulationConfig
                     }
                     if (sensor.second["zero_mean"]) {
                         sensor_cfg.zero_mean = sensor.second["zero_mean"].as<bool>();
+                    }
+                    if (sensor.second["offset"]) {
+                        sensor_cfg.offset = sensor.second["offset"].as<float>();
+                    }
+                    if (sensor.second["replace_nan"]) {
+                        sensor_cfg.replace_nan = sensor.second["replace_nan"].as<std::string>();
+                    }
+                    if (sensor.second["max_distance"]) {
+                        sensor_cfg.max_distance = sensor.second["max_distance"].as<float>();
                     }
                     
                     raycaster_sensors[name] = sensor_cfg;
