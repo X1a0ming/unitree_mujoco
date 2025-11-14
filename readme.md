@@ -128,7 +128,7 @@ The program will output the robot's pose and position information in the simulat
 The configuration file for the C++ simulator is located at `/simulate/config.yaml`:
 ```yaml
 # Robot name loaded by the simulator
-# "go2", "b2", "b2w", "h1"
+# "go2", "b2", "b2w", "h1", "g1"
 robot: "go2"
 # Robot simulation scene file
 # For example, for go2, it refers to the scene.xml file in the /unitree_robots/go2/ folder
@@ -148,6 +148,92 @@ print_scene_information: 1
 # Whether to use virtual tape, 1 to enable
 # Mainly used to simulate the hanging process of H1 robot initialization
 enable_elastic_band: 0 # For H1
+
+# ROS2 Publishers (optional)
+enable_ray_array: true     # Enable raycaster sensor publisher
+#enable_odom: true         # Enable odometry publisher
+#enable_gridmap: true      # Enable gridmap publisher
+
+# Raycaster output format (default for all sensors)
+raycaster_output_format: "array"  # "pointcloud" or "array" (default: "pointcloud")
+raycaster_flatten_xyz: false      # For array format: true=[x,y,z,...], false=[z,z,z,...] (default: true)
+raycaster_zero_mean: true         # For array format: subtract mean from z values (default: false)
+
+# Per-sensor raycaster configuration (optional, overrides defaults)
+raycaster_sensors:
+  height_scan:
+    output_format: "array"   # Output as Float32MultiArray
+    flatten_xyz: false       # Only z values [z0, z1, z2, ...]
+    zero_mean: true          # Subtract mean (good for terrain mapping)
+  depth_camera:
+    output_format: "pointcloud"  # Output as PointCloud2
+    # flatten_xyz and zero_mean not used for pointcloud format
+
+# Depth Image Visualizer (optional, impacts performance)
+enable_depth_visualizer: false  # Enable depth camera visualization overlay (default: false)
+
+# Publisher frequency control (Hz)
+publisher_frequency: 50.0        # Frequency for all ROS2 publishers (default: 50Hz)
+depth_visualizer_frequency: 10.0 # Frequency for depth image visualization (default: 10Hz, lower to improve performance)
+depth_visualizer_scale: 2        # Scale factor for depth image display (1-4, default: 2, lower is faster)
+```
+
+**ROS2 Publisher Configuration:**
+- **enable_ray_array**: Enable publishing of raycaster sensor data (height scan, depth camera)
+- **raycaster_output_format**: Default output format for all sensors
+  - `"pointcloud"`: Publish as `sensor_msgs/PointCloud2` (for RViz, SLAM, navigation)
+  - `"array"`: Publish as `std_msgs/Float32MultiArray` (for reinforcement learning, faster)
+- **raycaster_flatten_xyz**: Default for array format
+  - `true`: Flatten all coordinates `[x0, y0, z0, x1, y1, z1, ...]`
+  - `false`: Only z values (height) `[z0, z1, z2, ...]` (typical for terrain mapping)
+- **raycaster_zero_mean**: Default for array format
+  - `true`: Subtract mean from z values to normalize height (useful for RL)
+  - `false`: Keep original z values
+- **raycaster_sensors**: Per-sensor configuration (optional)
+  - Each sensor can override the default format and options
+  - Use sensor name as key (e.g., `height_scan`, `depth_camera`)
+  - Available options: `output_format`, `flatten_xyz`, `zero_mean`
+- **enable_depth_visualizer**: Show depth camera image overlay in MuJoCo viewer (impacts performance)
+- **publisher_frequency**: Control how often ROS2 topics are published (default 50Hz)
+- **depth_visualizer_frequency**: Control depth image update rate (default 10Hz, lower = better performance)
+
+**Example Configurations:**
+
+```yaml
+# Configuration 1: All sensors as array format
+raycaster_output_format: "array"
+raycaster_flatten_xyz: false
+raycaster_zero_mean: true
+
+# Configuration 2: Mixed formats per sensor
+raycaster_output_format: "pointcloud"  # Default
+raycaster_sensors:
+  height_scan:
+    output_format: "array"  # Override: use array for terrain
+    flatten_xyz: false
+    zero_mean: true
+  depth_camera:
+    # No override: use default pointcloud format
+
+# Configuration 3: Different settings for multiple sensors
+raycaster_sensors:
+  front_lidar:
+    output_format: "pointcloud"
+  height_scan:
+    output_format: "array"
+    flatten_xyz: false  # Only z
+    zero_mean: true
+  depth_camera:
+    output_format: "array"
+    flatten_xyz: true   # Full xyz
+    zero_mean: false
+```
+
+**Topics Published (when enabled):**
+- `/height_scan` or `/height_scan_array`: Height/terrain scan from raycaster
+- `/depth_camera` or `/depth_camera_array`: Depth camera data
+- `/odom`: Robot odometry (if enable_odom: true)
+- `/elevation_map`: GridMap elevation map (if enable_gridmap: true)
 ```
 ### Python Simulator
 The configuration file for the Python simulator is located at `/simulate_python/config.py`:

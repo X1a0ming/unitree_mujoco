@@ -3,11 +3,14 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/point_field.hpp>
+#include <std_msgs/msg/float32_multi_array.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 
 #include <mujoco/mujoco.h>
 #include <mujoco/mjplugin.h>
+
+#include "param.h"
 
 #include <string>
 #include <vector>
@@ -16,8 +19,15 @@
 
 class RaycasterPublisher {
 public:
-    RaycasterPublisher(rclcpp::Node::SharedPtr node) 
-        : node_(node), publish_tf_(true), initialized_(false) {
+    enum class OutputFormat {
+        POINTCLOUD,
+        ARRAY
+    };
+    
+    RaycasterPublisher(rclcpp::Node::SharedPtr node, OutputFormat format = OutputFormat::POINTCLOUD, 
+                       bool flatten_xyz = true, bool zero_mean = false) 
+        : node_(node), publish_tf_(true), initialized_(false), 
+          output_format_(format), flatten_xyz_(flatten_xyz), zero_mean_(zero_mean) {
         
         // Create TF broadcaster
         tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*node_);
@@ -81,11 +91,73 @@ public:
                     }
                 }
                 
-                // Create publisher
-                // Use /height_scan as default topic for compatibility with heightmap subscriber
-                std::string topic_name = "/height_scan";
-                sensor.publisher = node_->create_publisher<sensor_msgs::msg::PointCloud2>(
-                    topic_name, 10);
+                // Create publisher using sensor name as topic
+                std::string topic_name = "/" + std::string(sensor_name);
+                
+                // Get sensor-specific configuration or use defaults
+                std::string output_format_str = param::config.raycaster_output_format;
+                bool flatten_xyz = param::config.raycaster_flatten_xyz;
+                bool zero_mean = param::config.raycaster_zero_mean;
+                
+                // Check if sensor has specific configuration
+                auto it = param::config.raycaster_sensors.find(sensor_name);
+                if (it != param::config.raycaster_sensors.end()) {
+                    if (!it->second.output_format.empty()) {
+                        output_format_str = it->second.output_format;
+                    }
+                    flatten_xyz = it->second.flatten_xyz;
+                    zero_mean = it->second.zero_mean;
+                }
+                
+                // Determine output format for this sensor
+                OutputFormat sensor_format = (output_format_str == "array") ? 
+                    OutputFormat::ARRAY : OutputFormat::POINTCLOUD;
+                
+                sensor.output_format = sensor_format;
+                sensor.flatten_xyz = flatten_xyz;
+                sensor.zero_mean = zero_mean;
+                
+                if (sensor_format == OutputFormat::POINTCLOUD) {
+                    sensor.pc_publisher = node_->create_publisher<sensor_msgs::msg::PointCloud2>(
+                        topic_name, 10);
+                    
+                    // Pre-allocate message template to avoid repeated allocation
+                    int num_points = sensor.h_ray_num * sensor.v_ray_num;
+                    sensor.pc_msg_template.header.frame_id = sensor_name;
+                    sensor.pc_msg_template.height = 1;
+                    sensor.pc_msg_template.point_step = 12;
+                    sensor.pc_msg_template.is_dense = false;
+                    
+                    sensor.pc_msg_template.fields.resize(3);
+                    sensor.pc_msg_template.fields[0].name = "x";
+                    sensor.pc_msg_template.fields[0].offset = 0;
+                    sensor.pc_msg_template.fields[0].datatype = sensor_msgs::msg::PointField::FLOAT32;
+                    sensor.pc_msg_template.fields[0].count = 1;
+                    
+                    sensor.pc_msg_template.fields[1].name = "y";
+                    sensor.pc_msg_template.fields[1].offset = 4;
+                    sensor.pc_msg_template.fields[1].datatype = sensor_msgs::msg::PointField::FLOAT32;
+                    sensor.pc_msg_template.fields[1].count = 1;
+                    
+                    sensor.pc_msg_template.fields[2].name = "z";
+                    sensor.pc_msg_template.fields[2].offset = 8;
+                    sensor.pc_msg_template.fields[2].datatype = sensor_msgs::msg::PointField::FLOAT32;
+                    sensor.pc_msg_template.fields[2].count = 1;
+                    
+                    sensor.pc_msg_template.data.resize(num_points * 12);
+                } else {
+                    // Array format
+                    topic_name += "_array";
+                    sensor.array_publisher = node_->create_publisher<std_msgs::msg::Float32MultiArray>(
+                        topic_name, 10);
+                    
+                    int num_points = sensor.h_ray_num * sensor.v_ray_num;
+                    if (flatten_xyz_) {
+                        sensor.array_msg_template.data.reserve(num_points * 3);
+                    } else {
+                        sensor.array_msg_template.data.reserve(num_points);
+                    }
+                }
                 
                 raycaster_sensors_.push_back(std::move(sensor));
                 
@@ -128,7 +200,19 @@ private:
         int pos_w_data_offset;
         int pos_w_data_size;
         std::string frame_id;
-        rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr publisher;
+        
+        // Per-sensor configuration
+        OutputFormat output_format;
+        bool flatten_xyz;
+        bool zero_mean;
+        
+        // Publishers for different formats
+        rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pc_publisher;
+        rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr array_publisher;
+        
+        // Pre-allocated buffers
+        sensor_msgs::msg::PointCloud2 pc_msg_template;
+        std_msgs::msg::Float32MultiArray array_msg_template;
     };
     
     struct CameraSensor {
@@ -140,6 +224,20 @@ private:
         std::string frame_id;
     };
     
+    // Member variables
+    rclcpp::Node::SharedPtr node_;
+    bool publish_tf_;
+    bool initialized_;
+    OutputFormat output_format_;
+    bool flatten_xyz_;
+    bool zero_mean_;
+    
+    std::vector<RayCasterSensor> raycaster_sensors_;
+    std::map<std::string, CameraSensor> camera_sensors_;
+    
+    std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+    
+    // Private methods
     void find_camera_sensors(mjModel* m) {
         for (int i = 0; i < m->nsensor; i++) {
             const char* sensor_name = mj_id2name(m, mjOBJ_SENSOR, i);
@@ -189,40 +287,19 @@ private:
     
     void publish_raycaster_data(mjData* d) {
         for (auto& sensor : raycaster_sensors_) {
-            auto msg = sensor_msgs::msg::PointCloud2();
-            
-            // Set header
-            msg.header.stamp = node_->now();
-            msg.header.frame_id = sensor.frame_id;
+            if (sensor.output_format == OutputFormat::POINTCLOUD) {
+                publish_sensor_as_pointcloud(sensor, d);
+            } else {
+                publish_sensor_as_array(sensor, d);
+            }
+        }
+    }
+    
+    void publish_sensor_as_pointcloud(RayCasterSensor& sensor, mjData* d) {
+        auto& msg = sensor.pc_msg_template;
+        msg.header.stamp = node_->now();
             
             int num_points = sensor.h_ray_num * sensor.v_ray_num;
-            
-            msg.height = 1;
-            msg.width = num_points;
-            msg.point_step = 12;
-            msg.row_step = msg.point_step * msg.width;
-            msg.is_dense = false;
-            
-            // Resize data buffer first
-            msg.data.resize(msg.row_step);
-            
-            // Set fields after buffer resize to avoid reallocation
-            msg.fields.resize(3);
-            
-            msg.fields[0].name = "x";
-            msg.fields[0].offset = 0;
-            msg.fields[0].datatype = sensor_msgs::msg::PointField::FLOAT32;
-            msg.fields[0].count = 1;
-            
-            msg.fields[1].name = "y";
-            msg.fields[1].offset = 4;
-            msg.fields[1].datatype = sensor_msgs::msg::PointField::FLOAT32;
-            msg.fields[1].count = 1;
-            
-            msg.fields[2].name = "z";
-            msg.fields[2].offset = 8;
-            msg.fields[2].datatype = sensor_msgs::msg::PointField::FLOAT32;
-            msg.fields[2].count = 1;
             
             // Get data pointer
             mjtNum* data_ptr = nullptr;
@@ -232,30 +309,95 @@ private:
                 data_ptr = d->sensordata + sensor.data_adr;
             }
             
-            // Copy data and filter invalid points
+            // Fast copy with type conversion
             float* msg_data_ptr = reinterpret_cast<float*>(msg.data.data());
-            int valid_points = 0;
             for (int i = 0; i < num_points; i++) {
-                float x = static_cast<float>(data_ptr[i * 3 + 0]);
-                float y = static_cast<float>(data_ptr[i * 3 + 1]);
-                float z = static_cast<float>(data_ptr[i * 3 + 2]);
-                
-                // Check if point is valid (not NaN and not at extreme distance)
-                if (std::isfinite(x) && std::isfinite(y) && std::isfinite(z)) {
-                    msg_data_ptr[valid_points * 3 + 0] = x;
-                    msg_data_ptr[valid_points * 3 + 1] = y;
-                    msg_data_ptr[valid_points * 3 + 2] = z;
-                    valid_points++;
-                }
+                msg_data_ptr[i * 3 + 0] = static_cast<float>(data_ptr[i * 3 + 0]);
+                msg_data_ptr[i * 3 + 1] = static_cast<float>(data_ptr[i * 3 + 1]);
+                msg_data_ptr[i * 3 + 2] = static_cast<float>(data_ptr[i * 3 + 2]);
             }
             
-            // Update message size to reflect only valid points
-            msg.width = valid_points;
-            msg.row_step = msg.point_step * valid_points;
-            msg.data.resize(msg.row_step);
+            msg.width = num_points;
+            msg.row_step = msg.point_step * num_points;
             
-            sensor.publisher->publish(msg);
+            sensor.pc_publisher->publish(msg);
+    }
+    
+    void publish_sensor_as_array(RayCasterSensor& sensor, mjData* d) {
+        auto& msg = sensor.array_msg_template;
+        msg.data.clear();
+        
+        int num_points = sensor.h_ray_num * sensor.v_ray_num;
+        
+        // Get data pointer
+        mjtNum* data_ptr = nullptr;
+        if (sensor.pos_w_data_size > 0 && sensor.pos_w_data_offset >= 0) {
+            data_ptr = d->sensordata + sensor.data_adr + sensor.pos_w_data_offset;
+        } else {
+            data_ptr = d->sensordata + sensor.data_adr;
         }
+        
+        if (sensor.flatten_xyz) {
+            // Flatten all x, y, z values: [x0, y0, z0, x1, y1, z1, ...]
+            msg.data.reserve(num_points * 3);
+            
+            if (sensor.zero_mean) {
+                // First pass: compute mean of z values
+                float z_sum = 0.0f;
+                int z_count = 0;
+                for (int i = 0; i < num_points; i++) {
+                    float z = static_cast<float>(data_ptr[i * 3 + 2]);
+                    if (std::isfinite(z)) {
+                        z_sum += z;
+                        z_count++;
+                    }
+                }
+                float z_mean = (z_count > 0) ? (z_sum / z_count) : 0.0f;
+                
+                // Second pass: subtract mean from z
+                for (int i = 0; i < num_points; i++) {
+                    msg.data.push_back(static_cast<float>(data_ptr[i * 3 + 0]));
+                    msg.data.push_back(static_cast<float>(data_ptr[i * 3 + 1]));
+                    msg.data.push_back(static_cast<float>(data_ptr[i * 3 + 2]) - z_mean);
+                }
+            } else {
+                // No mean subtraction
+                for (int i = 0; i < num_points; i++) {
+                    msg.data.push_back(static_cast<float>(data_ptr[i * 3 + 0]));
+                    msg.data.push_back(static_cast<float>(data_ptr[i * 3 + 1]));
+                    msg.data.push_back(static_cast<float>(data_ptr[i * 3 + 2]));
+                }
+            }
+        } else {
+            // Only z values: [z0, z1, z2, ...]
+            msg.data.reserve(num_points);
+            
+            if (sensor.zero_mean) {
+                // Compute mean
+                float z_sum = 0.0f;
+                int z_count = 0;
+                for (int i = 0; i < num_points; i++) {
+                    float z = static_cast<float>(data_ptr[i * 3 + 2]);
+                    if (std::isfinite(z)) {
+                        z_sum += z;
+                        z_count++;
+                    }
+                }
+                float z_mean = (z_count > 0) ? (z_sum / z_count) : 0.0f;
+                
+                // Subtract mean
+                for (int i = 0; i < num_points; i++) {
+                    msg.data.push_back(static_cast<float>(data_ptr[i * 3 + 2]) - z_mean);
+                }
+            } else {
+                // No mean subtraction
+                for (int i = 0; i < num_points; i++) {
+                    msg.data.push_back(static_cast<float>(data_ptr[i * 3 + 2]));
+                }
+            }
+        }
+        
+        sensor.array_publisher->publish(msg);
     }
     
     void publish_transforms(mjData* d) {
@@ -283,13 +425,4 @@ private:
             tf_broadcaster_->sendTransform(t);
         }
     }
-    
-    rclcpp::Node::SharedPtr node_;
-    bool publish_tf_;
-    bool initialized_;
-    
-    std::vector<RayCasterSensor> raycaster_sensors_;
-    std::map<std::string, CameraSensor> camera_sensors_;
-    
-    std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 };

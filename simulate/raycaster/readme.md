@@ -806,6 +806,7 @@ make -j$(nproc)
 ```bash
 sudo apt install ros-humble-rclcpp \
                  ros-humble-sensor-msgs \
+                 ros-humble-std-msgs \
                  ros-humble-geometry-msgs \
                  ros-humble-tf2-ros \
                  ros-humble-grid-map-core \
@@ -813,6 +814,29 @@ sudo apt install ros-humble-rclcpp \
                  ros-humble-grid-map-msgs \
                  ros-humble-grid-map-cv \
                  ros-humble-pcl-conversions
+```
+
+### 配置文件
+
+编辑 `simulate/config.yaml`：
+
+```yaml
+# ROS2 Publishers (optional)
+enable_ray_array: true     # Enable raycaster sensor publisher
+#enable_odom: true         # Enable odometry publisher
+#enable_gridmap: true      # Enable gridmap publisher
+
+# Raycaster output format
+raycaster_output_format: "array"  # "pointcloud" or "array" (default: "pointcloud")
+raycaster_flatten_xyz: false      # For array format: true=[x,y,z,...], false=[z,z,z,...] (default: true)
+
+# Depth Image Visualizer (optional, impacts performance)
+enable_depth_visualizer: false  # Enable depth camera visualization overlay (default: false)
+
+# Publisher frequency control (Hz)
+publisher_frequency: 50.0        # Frequency for all ROS2 publishers (default: 50Hz)
+depth_visualizer_frequency: 10.0 # Frequency for depth image visualization (default: 10Hz, lower to improve performance)
+depth_visualizer_scale: 2        # Scale factor for depth image display (1-4, default: 2, lower is faster)
 ```
 
 ### 运行
@@ -823,6 +847,31 @@ source /opt/ros/humble/setup.bash
 ./unitree_mujoco
 ```
 
+### 输出格式说明
+
+#### PointCloud格式（传统）
+```yaml
+raycaster_output_format: "pointcloud"
+```
+- **输出**: `sensor_msgs/PointCloud2`
+- **话题**: `/height_scan`, `/depth_camera`
+- **用途**: RViz可视化、SLAM、导航、点云处理
+- **数据**: 3D点云 (x, y, z)
+
+#### Array格式（优化）
+```yaml
+raycaster_output_format: "array"
+raycaster_flatten_xyz: false
+```
+- **输出**: `std_msgs/Float32MultiArray`
+- **话题**: `/height_scan_array`, `/depth_camera_array`
+- **用途**: 强化学习、机器学习、高性能应用
+- **性能**: 更快的发布和订阅（无PointCloud序列化开销）
+
+**flatten_xyz选项**:
+- `true`: 完整3D数据 `[x0, y0, z0, x1, y1, z1, ...]`
+- `false`: 仅高度数据 `[z0, z1, z2, ...]` (推荐用于地形映射)
+
 ### 数据流
 
 ```
@@ -830,60 +879,65 @@ MuJoCo Simulation (mj_step)
     ↓
 Raycaster Plugin
     ↓
-RaycasterPublisher → /height_scan (PointCloud2)
+RaycasterPublisher (频率控制: 50Hz)
     ↓
-GridMapPublisher → /elevation_map (GridMap)
+┌──────────────────┬──────────────────┐
+│  PointCloud模式   │   Array模式      │
+├──────────────────┼──────────────────┤
+│ PointCloud2      │ Float32MultiArray│
+│ /height_scan     │ /height_scan_array
+│ /depth_camera    │ /depth_camera_array
+└──────────────────┴──────────────────┘
+    ↓
+GridMapPublisher (可选) → /elevation_map (GridMap)
+    ↓
+TF Publisher → /tf
 ```
 
 ### 话题说明
 
-| 话题 | 消息类型 | 说明 |
-|------|---------|------|
-| `/height_scan` | sensor_msgs/PointCloud2 | 点云数据 |
-| `/elevation_map` | grid_map_msgs/GridMap | 高程地图（可禁用） |
-| `/tf` | tf2_msgs/TFMessage | 坐标变换 |
+| 话题 | 消息类型 | 频率 | 说明 |
+|------|---------|------|------|
+| `/height_scan` | sensor_msgs/PointCloud2 | 可配置 | 点云数据（pointcloud模式） |
+| `/height_scan_array` | std_msgs/Float32MultiArray | 可配置 | 数组数据（array模式） |
+| `/depth_camera` | sensor_msgs/PointCloud2 | 可配置 | 深度相机点云（pointcloud模式） |
+| `/depth_camera_array` | std_msgs/Float32MultiArray | 可配置 | 深度相机数组（array模式） |
+| `/elevation_map` | grid_map_msgs/GridMap | 可配置 | 高程地图（需启用gridmap） |
+| `/odom` | nav_msgs/Odometry | 可配置 | 里程计（需启用odom） |
+| `/tf` | tf2_msgs/TFMessage | 实时 | 坐标变换 |
 
-### GridMap配置
+### 性能对比
 
-编辑 `config.yaml`：
+| 配置 | 发布开销 | 订阅解析 | 适用场景 |
+|------|---------|---------|---------|
+| PointCloud2 | 高 | 中等 | RViz、PCL处理、SLAM |
+| Array (flatten) | 低 | 快 | 完整3D数据、机器学习 |
+| Array (z-only) | 最低 | 最快 | 地形映射、强化学习 |
+
+**推荐配置**:
+- **可视化调试**: `pointcloud` 格式
+- **实时控制/强化学习**: `array` 格式 + `flatten_xyz: false`
+- **完整3D感知**: `array` 格式 + `flatten_xyz: true`
+
+### 频率控制
+
+新增的频率控制功能可以显著提升性能：
 
 ```yaml
-/**:
-  ros__parameters:
-    gridmap:
-      enabled: true           # 启用/禁用GridMap发布
-      map_frame: "odom"      # 地图坐标系
-      resolution: 0.05       # 网格分辨率（米）
-      min_x: -1.0           # 地图边界
-      max_x: 1.0
-      min_y: -1.0
-      max_y: 1.0
-      min_points_per_cell: 1
-      default_uncertainty: 0.1
+publisher_frequency: 50.0  # 所有ROS2发布器的统一频率
 ```
 
-### 验证数据
+**效果**:
+- 不再每个仿真步都发布（可能高达200+ Hz）
+- 按配置频率限制发布（默认50Hz）
+- 减少网络带宽和CPU开销
+- 提升整体仿真速率
 
-```bash
-# 查看话题
-ros2 topic list
-
-# 查看点云
-ros2 topic echo /height_scan --once
-
-# 查看GridMap
-ros2 topic echo /elevation_map --once
-
-# 查看频率
-ros2 topic hz /height_scan
-ros2 topic hz /elevation_map
-
-# RViz2可视化
-rviz2
-# Fixed Frame: "odom"
-# Add -> PointCloud2: /height_scan
-# Add -> GridMap: /elevation_map (Layer: elevation)
-```
+**调优建议**:
+- **实时控制**: 50-100 Hz
+- **SLAM/导航**: 20-30 Hz
+- **数据采集**: 10-20 Hz
+- **强化学习训练**: 10-30 Hz（与控制频率匹配）
 
 ---
 

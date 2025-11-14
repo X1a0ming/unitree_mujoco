@@ -131,7 +131,7 @@ python3 ./test/test_unitree_sdk2.py
 c++ 仿真器的配置文件位于 `/simulate/config.yaml` 中：
 ```yaml
 # 仿真器加载的机器人名称
-# "go2", "b2", "b2w", "h1"
+# "go2", "b2", "b2w", "h1", "g1"
 robot: "go2"
 
 # 机器人仿真仿真场景文件
@@ -143,12 +143,57 @@ domain_id: 1
 # 网卡名称, 对于仿真建议使用本地回环 "lo"
 interface: "lo"
 
+use_joystick: 1 # 使用游戏手柄模拟无线控制器
+joystick_type: "xbox" # 支持 "xbox" 和 "switch" 手柄布局
+joystick_device: "/dev/input/js0" # 设备路径
+joystick_bits: 16 # 某些游戏手柄可能只有 8 位精度
+
 # 是否输出机器人连杆、关节、传感器等信息，1为输出
 print_scene_information: 1
 
 # 是否使用虚拟挂带, 1 为启用
 # 主要用于模拟 H1 机器人初始化挂起的过程 
 enable_elastic_band: 0 # For H1 
+
+# ROS2 发布器配置（可选）
+enable_ray_array: true     # 启用射线传感器发布
+#enable_odom: true         # 启用里程计发布
+#enable_gridmap: true      # 启用栅格地图发布
+
+# 射线传感器输出格式
+raycaster_output_format: "array"  # "pointcloud" 或 "array" (默认: "pointcloud")
+raycaster_flatten_xyz: false      # array格式下: true=[x,y,z,...], false=[z,z,z,...] (默认: true)
+raycaster_zero_mean: true         # array格式下: 减去z值的均值以归一化高度 (默认: false)
+
+# 深度图像可视化（可选，影响性能）
+enable_depth_visualizer: false  # 在MuJoCo窗口中显示深度相机图像 (默认: false)
+
+# 发布器频率控制 (Hz)
+publisher_frequency: 50.0        # 所有ROS2发布器的频率 (默认: 50Hz)
+depth_visualizer_frequency: 10.0 # 深度图像可视化频率 (默认: 10Hz，降低可提高性能)
+depth_visualizer_scale: 2        # 深度图像显示缩放因子 (1-4, 默认: 2, 越小越快)
+```
+
+**ROS2 发布器配置说明：**
+- **enable_ray_array**: 启用射线传感器数据发布（高度扫描、深度相机）
+- **raycaster_output_format**: 
+  - `"pointcloud"`: 以 `sensor_msgs/PointCloud2` 格式发布（用于RViz、SLAM、导航）
+  - `"array"`: 以 `std_msgs/Float32MultiArray` 格式发布（用于强化学习，更快）
+- **raycaster_flatten_xyz**: 仅当输出格式为"array"时适用
+  - `true`: 展平所有坐标 `[x0, y0, z0, x1, y1, z1, ...]`
+  - `false`: 仅z值（高度） `[z0, z1, z2, ...]`（用于地形映射）
+- **raycaster_zero_mean**: 仅当输出格式为"array"时适用
+  - `true`: 减去z值的均值以归一化高度（对强化学习有用）
+  - `false`: 保持原始z值
+- **enable_depth_visualizer**: 在MuJoCo查看器中显示深度相机图像叠加层（影响性能）
+- **publisher_frequency**: 控制ROS2话题发布频率（默认50Hz）
+- **depth_visualizer_frequency**: 控制深度图像更新率（默认10Hz，降低可提高性能）
+
+**发布的话题（启用时）：**
+- `/height_scan` 或 `/height_scan_array`: 来自射线传感器的高度/地形扫描
+- `/depth_camera` 或 `/depth_camera_array`: 深度相机数据
+- `/odom`: 机器人里程计（如果 enable_odom: true）
+- `/elevation_map`: GridMap 高程地图（如果 enable_gridmap: true）
 ```
 ### python 仿真器
 python 仿真器的配置文件位于 `/simulate_python/config.py` 中：

@@ -41,8 +41,9 @@
 #include "raycaster_publisher.h"
 #include "gridmap_publisher.h"
 #include "odom_publisher.h"
-#include "height_scan_converter.h"
 #endif
+
+#include "depth_image_visualizer.h"
 
 #define MUJOCO_PLUGIN_DIR "mujoco_plugin"
 #define NUM_MOTOR_IDL_GO 20
@@ -117,16 +118,22 @@ namespace
   std::shared_ptr<RaycasterPublisher> raycaster_publisher = nullptr;
   std::shared_ptr<GridMapPublisher> gridmap_publisher = nullptr;
   std::shared_ptr<OdomPublisher> odom_publisher = nullptr;
-  std::shared_ptr<HeightScanConverter> height_scan_converter = nullptr;
   rclcpp::Node::SharedPtr raycaster_node = nullptr;
 #endif
+
+  // Depth image visualizer
+  std::unique_ptr<DepthImageVisualizer> depth_visualizer = nullptr;
+  
+  // Publisher timing control
+  double last_publisher_time = 0.0;
+  double last_depth_visualizer_time = 0.0;
 
   using Seconds = std::chrono::duration<double>;
 
   //---------------------------------------- plugin handling -----------------------------------------
 
   // return the path to the directory containing the current executable
-  // used to determine the location of auto-loaded plugin libraries
+  // used to determine the location of autoloaded plugin libraries
   std::string getExecutableDir()
   {
 #if defined(_WIN32) || defined(__CYGWIN__)
@@ -386,6 +393,13 @@ namespace
             raycaster_publisher->initialize(m, d);
           }
 #endif
+          // Initialize depth image visualizer (only if enabled)
+          if (param::config.enable_depth_visualizer) {
+            if (!depth_visualizer) {
+              depth_visualizer = std::make_unique<DepthImageVisualizer>(param::config.depth_visualizer_scale);
+            }
+            depth_visualizer->initialize(m, d, &sim);
+          }
         }
         else
         {
@@ -423,6 +437,13 @@ namespace
             raycaster_publisher->initialize(m, d);
           }
 #endif
+          // Initialize depth image visualizer (only if enabled)
+          if (param::config.enable_depth_visualizer) {
+            if (!depth_visualizer) {
+              depth_visualizer = std::make_unique<DepthImageVisualizer>(param::config.depth_visualizer_scale);
+            }
+            depth_visualizer->initialize(m, d, &sim);
+          }
         }
         else
         {
@@ -539,19 +560,29 @@ namespace
                 stepped = true;
 
 #ifdef ENABLE_ROS2
-                // Publish raycaster data after simulation step
-                if (raycaster_node && raycaster_publisher) {
-                  raycaster_publisher->publish(m, d);
-                }
-                // Publish odometry
-                if (raycaster_node && odom_publisher) {
-                  odom_publisher->publish(m, d);
+                // Publish raycaster data after simulation step (with frequency control)
+                double publisher_interval = 1.0 / param::config.publisher_frequency;
+                if (raycaster_node && (d->time - last_publisher_time) >= publisher_interval) {
+                  if (raycaster_publisher) {
+                    raycaster_publisher->publish(m, d);
+                  }
+                  // Publish odometry
+                  if (odom_publisher) {
+                    odom_publisher->publish(m, d);
+                  }
+                  last_publisher_time = d->time;
                 }
                 // Spin ROS2 node
                 if (raycaster_node) {
                   rclcpp::spin_some(raycaster_node);
                 }
 #endif
+                // Update depth image visualizer (with frequency control)
+                double depth_interval = 1.0 / param::config.depth_visualizer_frequency;
+                if (depth_visualizer && (d->time - last_depth_visualizer_time) >= depth_interval) {
+                  depth_visualizer->update_and_render(d);
+                  last_depth_visualizer_time = d->time;
+                }
 
                 // break if reset
                 if (d->time < prevSim)
@@ -612,6 +643,13 @@ void PhysicsThread(mj::Simulate *sim, const char *filename)
         odom_publisher->initialize(m, d);
       }
 #endif
+      // Initialize depth image visualizer (only if enabled)
+      if (param::config.enable_depth_visualizer) {
+        if (!depth_visualizer) {
+          depth_visualizer = std::make_unique<DepthImageVisualizer>(param::config.depth_visualizer_scale);
+        }
+        depth_visualizer->initialize(m, d, sim);
+      }
     }
     else
     {
@@ -726,16 +764,6 @@ int main(int argc, char **argv)
   // scan for libraries in the plugin directory to load additional plugins
   scanPluginLibraries();
 
-#ifdef ENABLE_ROS2
-  // Initialize ROS2
-  rclcpp::init(0, nullptr);
-  raycaster_node = std::make_shared<rclcpp::Node>("raycaster_publisher");
-  
-  // Initialize raycaster publisher
-  raycaster_publisher = std::make_shared<RaycasterPublisher>(raycaster_node);
-  std::printf("ROS2 raycaster publisher initialized\n");
-#endif
-
   mjvCamera cam;
   mjv_defaultCamera(&cam);
 
@@ -754,16 +782,26 @@ int main(int argc, char **argv)
   }
 
 #ifdef ENABLE_ROS2
-  // Initialize height scan converter
+  // Initialize ROS2
+  rclcpp::init(0, nullptr);
+  raycaster_node = std::make_shared<rclcpp::Node>("raycaster_publisher");
+  
+  // Initialize raycaster publisher with configured format
   if (param::config.enable_ray_array) {
-    // Parameters: (node, flatten_xyz, zero_mean)
-    // flatten_xyz=false: only output z values [z0, z1, z2, ...]
-    // zero_mean=true: subtract mean from z values to normalize height
-    height_scan_converter = std::make_shared<HeightScanConverter>(raycaster_node, false, true);
-    height_scan_converter->initialize("/height_scan", "/height_scan_array");
-    std::printf("ROS2 height scan converter initialized (flatten_xyz=false, zero_mean=true)\n");
+    RaycasterPublisher::OutputFormat format = RaycasterPublisher::OutputFormat::POINTCLOUD;
+    if (param::config.raycaster_output_format == "array") {
+      format = RaycasterPublisher::OutputFormat::ARRAY;
+    }
+    
+    raycaster_publisher = std::make_shared<RaycasterPublisher>(
+      raycaster_node, format, param::config.raycaster_flatten_xyz, param::config.raycaster_zero_mean);
+    
+    std::printf("ROS2 raycaster publisher initialized (format=%s, flatten_xyz=%s, zero_mean=%s)\n",
+                param::config.raycaster_output_format.c_str(),
+                param::config.raycaster_flatten_xyz ? "true" : "false",
+                param::config.raycaster_zero_mean ? "true" : "false");
   } else {
-    std::printf("ROS2 height scan converter disabled (set enable_ray_array: true in config.yaml to enable)\n");
+    std::printf("ROS2 raycaster publisher disabled (set enable_ray_array: true in config.yaml to enable)\n");
   }
 
   // Initialize GridMap publisher if enabled in config

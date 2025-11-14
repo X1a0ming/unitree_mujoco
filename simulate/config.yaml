@@ -17,3 +17,27 @@ enable_elastic_band: 0 # Virtual spring band, used for lifting h1
 enable_ray_array: true  # Enable ray array publisher
 #enable_odom: true      # Enable odometry publisher
 #enable_gridmap: true   # Enable grid map publisher
+
+## Raycaster output format (default for all sensors)
+#raycaster_output_format: "array"  # "pointcloud" or "array" (default: "pointcloud")
+#raycaster_flatten_xyz: false      # For array format: true=[x,y,z,...], false=[z,z,z,...] (default: true)
+#raycaster_zero_mean: true         # For array format: subtract mean from z values (default: false)
+
+# Per-sensor raycaster configuration (optional, overrides defaults)
+raycaster_sensors:
+  height_scan:
+    output_format: "array"   # Output as Float32MultiArray
+    flatten_xyz: false       # Only z values [z0, z1, z2, ...]
+    zero_mean: true          # Subtract mean (good for terrain mapping)
+  depth_camera:
+    output_format: "array"
+    flatten_xyz: false
+    zero_mean: false         # Keep absolute depth values
+
+# Depth Image Visualizer (optional, impacts performance)
+enable_depth_visualizer: true  # Enable depth camera visualization (default: false)
+
+# Publisher frequency control (Hz)
+publisher_frequency: 50.0        # Frequency for all ROS2 publishers (default: 50Hz)
+depth_visualizer_frequency: 10.0 # Frequency for depth image visualization (default: 10Hz, lower to improve performance)
+depth_visualizer_scale: 4        # Scale factor for depth image display (1-4, default: 2, lower is faster)
