@@ -39,7 +39,9 @@
 #ifdef ENABLE_ROS2
 #include <rclcpp/rclcpp.hpp>
 #include "raycaster_publisher.h"
+#ifdef ENABLE_GRIDMAP
 #include "gridmap_publisher.h"
+#endif
 #include "odom_publisher.h"
 #include "odom_subscriber.h"
 #endif
@@ -117,7 +119,9 @@ namespace
 #ifdef ENABLE_ROS2
   // ROS2 publishers
   std::shared_ptr<RaycasterPublisher> raycaster_publisher = nullptr;
+#ifdef ENABLE_GRIDMAP
   std::shared_ptr<GridMapPublisher> gridmap_publisher = nullptr;
+#endif
   std::shared_ptr<OdomPublisher> odom_publisher = nullptr;
   rclcpp::Node::SharedPtr raycaster_node = nullptr;
   rclcpp::Node::SharedPtr odom_node = nullptr;
@@ -829,6 +833,7 @@ int main(int argc, char **argv)
   }
 
   // Initialize GridMap publisher if enabled in config
+#ifdef ENABLE_GRIDMAP
   if (param::config.enable_gridmap) {
     gridmap_publisher = std::make_shared<GridMapPublisher>(raycaster_node, "/height_scan", "/elevation_map");
     if (gridmap_publisher->isEnabled()) {
@@ -837,6 +842,13 @@ int main(int argc, char **argv)
   } else {
     std::printf("ROS2 gridmap publisher disabled (set enable_gridmap: true in config.yaml to enable)\n");
   }
+#else
+  if (param::config.enable_gridmap) {
+    std::printf("ROS2 gridmap publisher requested but not compiled (reconfigure with -DENABLE_GRIDMAP=ON)\n");
+  } else {
+    std::printf("ROS2 gridmap publisher disabled\n");
+  }
+#endif
   
   // Initialize Odometry publisher with its own node
   if (param::config.enable_odom) {

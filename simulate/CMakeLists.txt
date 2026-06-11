@@ -1,8 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
 project(unitree_mujoco)
 
-# Option to enable ROS2 support (includes raycaster and gridmap)
-option(ENABLE_ROS2 "Enable ROS2 support (raycaster + gridmap)" OFF)
+# Option to enable ROS2 support.
+option(ENABLE_ROS2 "Enable ROS2 support (raycaster publishers)" OFF)
+option(ENABLE_GRIDMAP "Enable ROS2 grid_map publisher support" OFF)
 
 if (CMAKE_BUILD_TYPE MATCHES "Debug")
   message("Debug mode")
@@ -27,7 +28,8 @@ if(ENABLE_ROS2)
   find_package(tf2_ros REQUIRED)
   find_package(PCL REQUIRED COMPONENTS common)
   find_package(pcl_conversions REQUIRED)
-  message(STATUS "ROS2 support enabled (raycaster + gridmap)")
+  find_package(nav_msgs REQUIRED)
+  message(STATUS "ROS2 support enabled (raycaster publishers)")
   add_definitions(-DENABLE_ROS2)
 endif()
 
@@ -93,13 +95,29 @@ target_link_libraries(unitree_mujoco sensor_ray ${FMT_LINK_LIBRARIES})
 # IMPORTANT: grid_map packages must be found AFTER sensor_ray is defined
 # to avoid polluting sensor_ray with EIGEN plugin definitions
 if(ENABLE_ROS2)
+  target_include_directories(unitree_mujoco PRIVATE ${PCL_INCLUDE_DIRS})
+  target_link_libraries(unitree_mujoco
+    ${PCL_LIBRARIES}
+  )
+  ament_target_dependencies(unitree_mujoco
+    rclcpp
+    sensor_msgs
+    geometry_msgs
+    tf2_ros
+    pcl_conversions
+    nav_msgs
+  )
+endif()
+
+if(ENABLE_ROS2 AND ENABLE_GRIDMAP)
   # Find grid_map packages here (after sensor_ray target is created)
   find_package(grid_map_msgs REQUIRED)
   find_package(grid_map_ros REQUIRED)
   find_package(grid_map_cv REQUIRED)
   find_package(grid_map_core REQUIRED)
-  find_package(nav_msgs REQUIRED)
   find_package(CURL REQUIRED)
+  message(STATUS "ROS2 grid_map support enabled")
+  add_definitions(-DENABLE_GRIDMAP)
   
   # Remove global definitions added by grid_map_core
   remove_definitions(-DEIGEN_DENSEBASE_PLUGIN="grid_map_core/eigen_plugins/DenseBasePlugin.hpp")
@@ -117,22 +135,14 @@ if(ENABLE_ROS2)
     ${grid_map_ros_INCLUDE_DIRS}
     ${grid_map_cv_INCLUDE_DIRS}
   )
-  target_link_libraries(unitree_mujoco 
-    ${PCL_LIBRARIES}
-    fmt::fmt
+  target_link_libraries(unitree_mujoco
     CURL::libcurl
   )
   ament_target_dependencies(unitree_mujoco
-    rclcpp
-    sensor_msgs
-    geometry_msgs
-    tf2_ros
     grid_map_msgs
     grid_map_ros
     grid_map_cv
     grid_map_core
-    pcl_conversions
-    nav_msgs
   )
 endif()
 
