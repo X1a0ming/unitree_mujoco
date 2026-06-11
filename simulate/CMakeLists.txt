@@ -16,6 +16,8 @@ list(APPEND CMAKE_PREFIX_PATH "/opt/unitree_robotics/lib/cmake")
 find_package(unitree_sdk2 REQUIRED)
 find_package(Boost REQUIRED COMPONENTS program_options)
 find_package(Eigen3 REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(FMT REQUIRED fmt)
 
 # Find ROS2 if enabled
 if(ENABLE_ROS2)
@@ -83,7 +85,8 @@ add_custom_command(TARGET sensor_ray POST_BUILD
 )
 
 add_executable(unitree_mujoco ${SIM_SRC} src/main.cc)
-target_link_libraries(unitree_mujoco sensor_ray)
+target_link_directories(unitree_mujoco PRIVATE ${FMT_LIBRARY_DIRS})
+target_link_libraries(unitree_mujoco sensor_ray ${FMT_LINK_LIBRARIES})
 
 # Link ROS2 libraries if enabled
 # IMPORTANT: grid_map packages must be found AFTER sensor_ray is defined
@@ -95,7 +98,6 @@ if(ENABLE_ROS2)
   find_package(grid_map_cv REQUIRED)
   find_package(grid_map_core REQUIRED)
   find_package(nav_msgs REQUIRED)
-  find_package(fmt REQUIRED)
   find_package(CURL REQUIRED)
   
   # Remove global definitions added by grid_map_core
